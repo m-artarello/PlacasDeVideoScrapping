@@ -1,125 +1,151 @@
 from selenium import webdriver
 from bs4 import BeautifulSoup
 import re
-import csv
 import time
 from urllib.parse import quote
 
 # Definindo as variáveis iniciais
-site = "https://www.pichau.com.br"
+site = "https://www.kabum.com.br/"
 categoria = "monitor"
 produto = "aoc"
 
-# Criando a query de pesquisa
-query = quote(f"{categoria} {produto}")
-pesquisa_produto = f"{site}/search?q={query}"
+# Lista de formatos de busca
+search_formats = [
+    "search?q={}",
+    "busca/{}",
+    "busca?str={}",
+    "pesquisa?q={}",
+    "?s={}"
+]
 
-# Inicializando o navegador
-browser = webdriver.Chrome()
-browser.get(pesquisa_produto)
-print("Pesquisando:", pesquisa_produto)
 
-# Espera para carregamento da página (ajuste se necessário)
-time.sleep(3)
 
-# Coletando o conteúdo da página
-html_content = browser.page_source
-soup = BeautifulSoup(html_content, 'html.parser')
-
-# Detectando blocos de produtos
-products = []
-blocks = soup.find_all(True)
-
-for block in blocks:
-    # Extrair link
-
-    link_tag = block.find('a', href=True)
-
-    # Verifica se existe um link e se algum ancestral tem classe contendo "products"
-    if link_tag:
-        # Verifica se algum ancestral tem classe contendo "products"
-        parent_with_products = link_tag.find_parent(class_=re.compile(r'products')) #VALIDAR ATRIBUTOS DO PAI
-
-        # Se não encontrar ancestral com "products", verifica se o próprio link tem algum atributo contendo "product"
-        if not parent_with_products:
-            # Verifica se algum dos atributos do link contém o texto 'product'
-            parent_with_products = any('product' in value for value in link_tag.attrs.values())
-
-        # Define o link se um dos critérios for atendido
-        link = link_tag['href'] if parent_with_products else None
-    else:
-        link = None
-
-    # Definir o texto da categoria e do produto a ser procurado
-    category_normalized = categoria.lower().strip()
-    product_search_normalized = produto.lower().strip()
-
-    # Procurar diretamente por elementos que atendam às condições
+def realizar_busca(pesquisa_produto):
+    count = 1
     name = None
-    for tag in block.find_all(True):
-        # Ignorar tags que tenham filhos (não são folhas)
-        if tag.find_all(True):
-            continue
+    link = None
+    price = None
+    """Função que realiza a busca no navegador e retorna os produtos encontrados"""
+    browser = webdriver.Chrome()
+    browser.get(pesquisa_produto)
+    print("Pesquisando:", pesquisa_produto)
 
-        # Normalizar o texto da tag
-        title_text_normalized = tag.get_text(strip=True).lower().strip()
+    # Espera para carregamento da página (ajuste se necessário)
+    time.sleep(3)
 
-        # Verifica se o título começa com a categoria e contém o produto
-        if title_text_normalized.startswith(category_normalized) and product_search_normalized in title_text_normalized:
+    # Coletando o conteúdo da página
+    html_content = browser.page_source
+    soup = BeautifulSoup(html_content, 'html.parser')
 
-            # Verificar se há um pai ou irmão com classe/atributo contendo "product"
-            parent_with_products = tag.find_parent(lambda t: any('product' in str(value) for value in t.attrs.values()))
+    # Detectando blocos de produtos
+    products = []
+    unique_products = set()  # Conjunto para rastrear combinações únicas de nome e preço
+    blocks = soup.find_all(True)
 
+    for block in blocks:
+        link_tag = block.find('a', href=True)
+
+        if link_tag:
+            parent_with_products = link_tag.find_parent(class_=re.compile(r'products'))
+
+            if not parent_with_products:
+                parent_with_products = any('product' in value for value in link_tag.attrs.values())
+
+            link = link_tag['href'] if parent_with_products else None
+        else:
+            link = None
+
+        print(count, link, name, price)
+
+        category_normalized = categoria.lower().strip()
+        product_search_normalized = produto.lower().strip()
+
+
+        for tag in block.find_all(True):
+            if tag.find_all(True):
+                continue
+
+            title_text_normalized = tag.get_text(strip=True).lower().strip()
+
+            if title_text_normalized.startswith(category_normalized) and product_search_normalized in title_text_normalized:
+                parent_with_products = tag.find_parent(lambda t: any('product' in str(value) for value in t.attrs.values()))
+                sibling_with_products = any(
+                    'product' in str(value) for sibling in tag.find_all_next(True)
+                    for value in sibling.attrs.values()
+                )
+
+                if parent_with_products or sibling_with_products:
+                    name = tag.get_text(strip=True)
+                    break
+
+        if not name:
+            name = None
+
+        print(count, link, name, price)
+
+        price_match = re.search(r'R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?', block.get_text())
+
+        price = None
+
+        if price_match:
+            possible_price = price_match.group()
+
+            parent_with_products = block.find_parent(lambda t: any('product' in str(value) for value in t.attrs.values()))
             sibling_with_products = any(
-                'product' in str(value) for sibling in tag.find_all_next(True)
+                'product' in str(value) for sibling in block.find_all_next(True)
                 for value in sibling.attrs.values()
             )
 
             if parent_with_products or sibling_with_products:
-                name = tag.get_text(strip=True)
-                break  # Se encontrar o nome válido, sai do loop
+                if possible_price:
+                    try:
+                        element = browser.find_element("xpath", f"//*[text()='{possible_price}']")
+                        text_decoration = element.value_of_css_property('text-decoration')
 
-    # Se nenhum nome válido for encontrado, será None
-    if not name:
-        name = None
+                        if 'line-through' not in text_decoration:
+                            price = possible_price
+                        else:
+                            for sibling_price_tag in block.find_all_next(string=re.compile(r'R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?')):
+                                sibling_price = sibling_price_tag.strip()
+                                try:
+                                    sibling_element = browser.find_element("xpath", f"//*[text()='{sibling_price}']")
+                                    sibling_decoration = sibling_element.value_of_css_property('text-decoration')
 
-    # Buscar preços que contenham o símbolo "R$"
-    price_match = re.search(
-        r'R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?', block.get_text()
-    )
+                                    if 'line-through' not in sibling_decoration:
+                                        price = sibling_price
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
 
-    price = None
+        print(count, link, name, price)
 
-    if price_match:
-        # Texto bruto do possível preço
-        possible_price = price_match.group()
+        if link and name and price:
+            if (name, price) not in unique_products:
+                unique_products.add((name, price))
+                products.append({'name': name, 'price': price, 'link': link})
 
-        # Verificar se o próprio elemento, um pai ou irmão tem uma classe ou atributo com "product"
-        parent_with_products = block.find_parent(lambda t: any('product' in str(value) for value in t.attrs.values()))
+    browser.quit()
+    count +=1
+    return products
 
-        sibling_with_products = any(
-            'product' in str(value) for sibling in block.find_all_next(True)
-            for value in sibling.attrs.values()
-        )
+# Tentando todas as URLs de busca
+found_products = False
 
-        # Só definir o preço se o contexto for válido
-        if parent_with_products or sibling_with_products:
-            price = possible_price
+for search_format in search_formats:
+    pesquisa_produto = f"{site}{search_format.format(quote(f'{categoria} {produto}'))}"
+    products = realizar_busca(pesquisa_produto)
 
-    # Verificar se todas as informações foram capturadas
-    if link and name and price:
-        products.append({'name': name, 'price': price, 'link': link})
+    if products:
+        found_products = True
+        print(f"Encontrados {len(products)} produtos na URL: {pesquisa_produto}")
+        for product in products:
+            print("Nome:", product["name"])
+            print("Preço:", product["price"])
+            print("Link:", site + product["link"])
+            print("")
+        break
 
-browser.quit()
-
-# Exibindo resultados e salvando em CSV
-print(f"Encontrados {len(products)} produtos")
-
-if products:
-    for product in products:
-        print("Nome: " + product["name"])
-        print("Preço: " + product["price"])
-        print("Link: " + site + product["link"])
-        print("")
-else:
-    print("Não foram encontrados produtos.")
+if not found_products:
+    print("Não foram encontrados produtos em nenhum formato de pesquisa.")
