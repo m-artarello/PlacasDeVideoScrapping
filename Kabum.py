@@ -5,7 +5,7 @@ import time
 from urllib.parse import quote
 
 # Definindo as variáveis iniciais
-site = "https://www.kabum.com.br/"
+site = "https://www.pichau.com.br/"
 categoria = "monitor"
 produto = "aoc"
 
