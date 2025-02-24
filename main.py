@@ -1,144 +1,277 @@
-import re
 import requests
-from bs4 import BeautifulSoup
-from urllib.parse import quote
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+import re
+import time
+from urllib.parse import quote
 
-# Formatos de pesquisa mapeados
+# Definindo as variáveis iniciais
+site = None
+category = None
+product = None
+
+# Lista de formatos de busca
 search_formats = [
     "busca/{}",
-    "busca?str={}",
     "search?q={}",
+    "busca?str={}",
     "pesquisa?q={}",
-    "?s={}",
-]
-tags = [
-    "a",
-    "div",
-    "li"
+    "?s={}"
 ]
 
-# Solicita qual e-commerce acessar e converte na query de pesquisa
-eCommerce = input("Qual e-commerce deseja acessar? ")
-queryECommerce = quote(f"{eCommerce} site oficial")
+def get_ecommerce_link(html):
+    div = html.find("div", attrs={"data-type": "web"})
 
-# Faz a busca do e-commerce no Bing
-search_url = f"https://www.bing.com/search?q={queryECommerce}"
-
-# Faz a requisição ao Bing
-response = requests.get(search_url)
-
-if response.status_code == 200:
-    # converte o resultado da pesquisa no Bing em um HTML
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Pega o primeiro link nos resultados
-    first_result = soup.find("a", class_="tilk")
-
-    if first_result:
-        link = first_result["href"]
-        print(f"Acessando o e-commerce: {link}")
+    if div:
+        link = div.find("a")
+        if link:
+            href = link.get("href")
+            print("Link encontrado:", href)
+            return href
+        else:
+            print("Nenhum link encontrado dentro da div.")
     else:
-        print("Nenhum resultado encontrado.")
-else:
-    print("Erro ao acessar o Bing.")
+        print("Nenhuma div encontrada.")
 
-# solicita a categoria e o produto para o usuário
-category = input("Qual a categoria do produto?")
-productSearch = input("Qual produto deseja pesquisar?")
+def user_search_data():
+    # Solicita qual e-commerce acessar e converte na query de pesquisa
+    eCommerce = input("Qual e-commerce deseja acessar? ")
+    queryECommerce = quote(f"{eCommerce} site oficial")
 
-# converte o texto de produto informado para poder realizar a pesquisa
-queryProduct = quote(category + productSearch)
+    # Faz a busca do e-commerce no Bing
+    search_url = f"https://search.brave.com/search?q={queryECommerce}"
 
-browser = webdriver.Chrome()
+    # Faz a requisição ao Bing
+    response = requests.get(search_url)
 
-# tenta todos os formatos de pesquisa até dar certo
-for format_url in search_formats:
-    search_url = f"{link}{format_url.format(queryProduct)}"
-    print(f"Tentando acessar a URL: {search_url}")
+    if response.status_code == 200:
+        # converte o resultado da pesquisa no Bing em um HTML
+        html = BeautifulSoup(response.text, "html.parser")
 
-    browser.get(search_url)
+        site = get_ecommerce_link(html)
 
-    try:
-        # Aguarda até que algum conteúdo da página tenha sido carregado
-        WebDriverWait(browser, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-        )
-        print(f"Página carregada com sucesso com o formato: {search_url}")
-        break  # Sai do loop se a página for carregada com sucesso
-    except Exception as e:
-        print(f"Erro ao acessar a página com a URL {search_url}: {e}")
-        continue  # Tenta o próximo formato de URL
+    # solicita a categoria e o produto para o usuário
+    category = input("Qual a categoria do produto? ")
+    product = input("Qual produto deseja pesquisar? ")
 
-# Se nenhuma URL carregou com sucesso
-if not browser.current_url:
-    print("Não foi possível acessar a página de pesquisa do produto.")
-else:
-    print(f"URL de pesquisa carregada com sucesso: {browser.current_url}")
+    category = category.lower().strip()
+    product = product.lower().strip()
 
-# Espera até que os produtos sejam carregados
-try:
-    WebDriverWait(browser, 20).until(
-        EC.presence_of_element_located((By.TAG_NAME, 'body'))
-    )
-    print("Página carregada com sucesso!")
-except:
-    print("Erro ao carregar os produtos.")
+    return site, category, product
+
+def start_browser():
+    return webdriver.Chrome()
+
+def stop_browser(browser):
     browser.quit()
-    exit()
 
-content = browser.page_source
+def get_page_html(pesquisa_produto):
+    count = 1
+    name = None
+    link = None
+    price = None
 
-# Converte o conteúdo da página para BeautifulSoup
-converted_content = BeautifulSoup(content, 'html.parser')
+    # Função que realiza a busca no navegador e retorna os produtos encontrados
+    browser = start_browser()
+    browser.get(pesquisa_produto)
 
-# Lista para armazenar os produtos encontrados
-products = []
+    print("Pesquisando:", pesquisa_produto)
 
-for tag in tags:
-    print(tag)
-    for product in converted_content.find_all(tag, class_=re.compile("product")):
-        print(product)
+    # Espera para carregamento da página (ajuste se necessário)
+    time.sleep(3)
 
-browser.close()
+    page = browser.page_source
+    html_page = BeautifulSoup(page, 'html.parser')
 
-# # Itera sobre os produtos encontrados na página
-# for product in converted_content.find_all("div", class_=re.compile("product")):
-#     title_element = product.find("h2")
-#
-#     if title_element:
-#         title_text_normalized = title_element.get_text(strip=True).lower()
-#         product_search_normalized = productSearch.lower().strip()
-#         category_normalized = category.lower().strip()
-#
-#         if title_text_normalized.startswith(category_normalized) and product_search_normalized in title_text_normalized:
-#             product_name = title_text_normalized
-#
-#             link_element = product.find("a", class_="product-item__name")
-#             product_href = link_element["href"] if link_element else None
-#
-#             price = product.find("div", class_=re.compile("price"))
-#             new_price = price.get_text(strip=True) if price else None
-#
-#             if new_price:
-#                 new_price_adjusted = new_price.replace("\n", "").replace(" ", "").replace("àvista", " à vista").strip()
-#
-#                 product_info = {
-#                     "Nome": product_name,
-#                     "Preço": new_price_adjusted,
-#                     "Link": product_href
-#                 }
-#                 products.append(product_info)
-#
-# # Exibe os resultados encontrados
-# if products:
-#     for product in products:
-#         print("Nome: " + product["Nome"])
-#         print("Preço: " + product["Preço"])
-#         print("Link: " + product["Link"])
-#         print("")
-# else:
-#     print("Não foram encontrados produtos.")
+    if html_page:
+        stop_browser(browser)
+        return html_page
+    else:
+        print("Página não encontrada.")
+
+def get_link_tag(block):
+    link_tag = block.find('a', href=lambda href: href and href != '/' and category in href and product in href)
+
+    return link_tag if link_tag else None
+
+def format_link(link, site):
+    # Verifica se o link já começa com a URL base do site
+    if link.startswith(site):
+        return link  # Retorna o link completo
+    else:
+        return site + link  # Concatena a URL base ao link
+
+def get_name(block):
+    name_tag = block.find('h2') or block.find('h3')
+
+    if name_tag:
+        # Procura por um <span> dentro do <h2> ou <h3>
+        name_span = name_tag.find('span')
+        if name_span:
+            name = name_span.get_text(strip=True)
+        else:
+            # Se não houver <span>, pega o texto diretamente do <h2> ou <h3>
+            name = name_tag.get_text(strip=True)
+    else:
+        name = None  # Retorna None se não encontrar nenhuma tag
+
+    return name
+
+def strip_price(price_text):
+    if not price_text is None:
+        return price_text.replace("\xa0", " ")
+    else:
+        return "Nenhum preço encontrado"
+
+def get_price(block):
+    price = None
+
+    if get_price_a_vista(block) != "Preço não encontrado":
+        return get_price_a_vista(block)
+    elif get_price_test_attribute(block) != "Preço não encontrado":
+        return get_price_test_attribute(block)
+    elif get_price_new_price(block) != "Preço não encontrado":
+        return get_price_new_price(block)
+    elif get_price_price_card(block) != "Preço não encontrado":
+        return get_price_price_card(block)
+    else:
+        "Preço não encontrado"
+
+def get_price_price_card(block):
+    price = None
+
+    # Procura pelo span que contém o preço atual
+    price_tag = block.find('span', class_=re.compile(r'priceCard'))
+
+    if price_tag:
+        # Extrai o texto do span
+        price_text = price_tag.get_text(strip=True)
+
+        price = strip_price(price_text)
+        return price
+
+    if price is None:
+        return "Preço não encontrado"
+
+def get_price_new_price(block):
+    price = None
+    price_tag = block.find(lambda tag: tag and 'por:' in tag.get_text(strip=True))
+
+    if price_tag:
+        # Encontra a div que contém o preço
+        price_text = price_tag.find_next('div', class_=re.compile(r'new-price'))
+
+        if price_text:
+            # Extrai o valor do preço
+            price = price_text.find('span').get_text(strip=True)
+            return price
+
+    if price is None:
+        return "Preço não encontrado"
+
+def get_price_test_attribute(block):
+    price = None
+    price_tag = block.find('p', {'data-testid': 'price-value'})
+
+    if price_tag:
+        price_text = price_tag.get_text(separator=" ", strip=True).replace("ou ", "")
+        if price_text:
+            price = strip_price(price_text)
+            return price
+
+    if price is None:
+        return "Preço não encontrado"
+
+def get_price_a_vista(block):
+    price = None
+
+    price_tag = block.find(lambda tag: tag.name == 'span' and 'à vista' in tag.get_text(strip=True))
+
+    if price_tag:
+        # Encontra o próximo elemento irmão que contém o preço
+        price_text = price_tag.find_next(
+            lambda tag: tag.name == 'div' and re.search(r'R\$\s*\d+\.?\d*,\d{2}', tag.get_text(strip=True)))
+
+        if price_text:
+            # Extrai o texto que corresponde ao preço
+            price_match = re.search(r'R\$\s*\d+\.?\d*,\d{2}', price_text.get_text(strip=True))
+
+            if price_match:
+                price = price_match.group(0)  # Extrai o valor correspondente ao padrão
+                return price
+
+    if price is None:
+        return "Preço não encontrado"
+
+def get_product_grid(html_page):
+    return html_page.find(class_=re.compile(r'products-grid'))
+
+def get_products(html_page):
+    # Detectando blocos de produtos
+    products = []
+    unique_products = set()  # Conjunto para rastrear combinações únicas de nome e preço
+
+    if get_product_grid(html_page):
+        blocks = get_product_grid(html_page)
+    else:
+        blocks = html_page.find_all(True)
+
+    for block in blocks:
+
+        if block == '\n':
+            continue
+
+        price = None
+        link = None
+
+        product_content = block.find_all(class_=re.compile(r'content'), limit=1)
+        if product_content:
+            product_content = product_content[0]  # Pega o primeiro resultado
+        else:
+            product_content = None
+
+        link_tag = get_link_tag(block)
+
+        if product_content:
+            name = get_name(product_content)
+            if name and link_tag:
+                price = get_price(product_content)
+        else:
+            if link_tag:
+                name = get_name(link_tag)
+                if name and link_tag:
+                    price = get_price(link_tag)
+
+        if link_tag:
+            link = link_tag['href']
+
+        if link and name and price:
+            if (name, price, link) not in unique_products:
+                unique_products.add((name, price, link))
+                products.append({'name': name, 'price': price, 'link': link})
+    return products
+
+# Tentando todas as URLs de busca
+found_products = False
+
+site, category, product = user_search_data()
+
+for search_format in search_formats:
+    pesquisa_produto = f"{site}{search_format.format(quote(f'{category} {product}'))}"
+    html_page = get_page_html(pesquisa_produto)
+    products = get_products(html_page)
+
+    if products:
+        found_products = True
+        print(f"\nEncontrados {len(products)} produtos na URL: {pesquisa_produto}\n")
+        for product in products:
+            print("Nome:", product["name"])
+            print("Preço:", product["price"])
+
+            link = format_link(product["link"], site)
+            print("Link:", link)
+            print("")
+        break
+
+if not found_products:
+    print("Não foram encontrados produtos em nenhum formato de pesquisa.")
